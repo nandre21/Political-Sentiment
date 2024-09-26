@@ -1,0 +1,239 @@
+# Load required libraries
+library(shiny)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(bslib)           
+library(shinycssloaders)  
+library(tm)               # For text cleaning
+library(sentimentr)       # For sentiment analysis
+library(RedditExtractoR)  # Ensure this package is available to fetch data
+
+# Function to fetch Reddit comments
+fetch_reddit_comments <- function(subreddit = "politics", period = "day", sort_by = "new", max_pages = 5) {
+  tryCatch({
+    reddit_urls <- find_thread_urls(subreddit = subreddit, sort_by = sort_by, period = period)
+    reddit_urls <- reddit_urls[1:min(max_pages, nrow(reddit_urls)), ]
+    reddit_comments <- get_thread_content(reddit_urls$url)
+    return(reddit_comments$comments)
+  }, error = function(e) {
+    message("Error fetching Reddit data: ", e$message)
+    return(NULL)
+  })
+}
+
+# Function to clean text
+clean_text <- function(text) {
+  text <- tolower(text)  # Convert to lowercase
+  text <- removePunctuation(text)  # Remove punctuation
+  text <- removeNumbers(text)  # Remove numbers
+  text <- removeWords(text, stopwords("en"))  # Remove common stopwords
+  text <- stripWhitespace(text)  # Remove excess whitespace
+  return(text)
+}
+
+# Polarity Detection using sentimentr
+get_polarity <- function(text) {
+  sentiment_scores <- sentiment(text)
+  return(sentiment_scores)
+}
+
+# UI of the app
+ui <- fluidPage(
+  theme = bslib::bs_theme(
+    bg = "#ffffff",
+    fg = "#333333",
+    primary = "#E63946",
+    secondary = "#F1FAEE",
+    base_font = bslib::font_google("Roboto")
+  ),
+  titlePanel("Reddit Comments Sentiment and Profanity Analysis"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      textInput("subreddit", "Enter Subreddit", value = "politics"),
+      textInput("leaders", "Enter Political Leaders (comma-separated)", value = "Trump, Kamala"),
+      textInput("countries", "Enter Countries (comma-separated)", value = "USA"),
+      actionButton("submit", "Fetch Comments", style = "color: #ffffff; background-color: #E63946;"),
+      tags$hr(),
+      h4("Instructions"),
+      p("Enter the subreddit name and names of political leaders or countries for sentiment analysis.")
+    ),
+    
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Analysis Overview",
+                 h3("Sentiment Analysis Results"),
+                 textOutput("sentimentSummary"),
+                 textOutput("sentimentScale"),
+                 withSpinner(plotlyOutput("sentimentPlot")),
+                 withSpinner(plotlyOutput("comparisonPlot")),
+                 downloadButton("downloadData", "Download Sentiment Data"),
+                 h4("Top Comments"),
+                 verbatimTextOutput("topComments")
+        ),
+        tabPanel("Word Frequency",
+                 h3("Most Common Words in Comments"),
+                 withSpinner(plotlyOutput("wordFreqPlot"))
+        )
+      )
+    )
+  ),
+  
+  tags$footer("Powered by RedditExtractoR & Shiny", align = "center", style = "margin-top: 20px;")
+)
+
+# Server logic of the app
+server <- function(input, output, session) {
+  observeEvent(input$submit, {
+    subreddit <- input$subreddit
+    leaders <- unlist(strsplit(input$leaders, ","))
+    countries <- unlist(strsplit(input$countries, ","))
+    
+    # Fetch Reddit comments
+    reddit_comments <- fetch_reddit_comments(subreddit = subreddit)
+    
+    # Check if comments are fetched successfully
+    if (is.null(reddit_comments) || nrow(reddit_comments) == 0) {
+      output$sentimentSummary <- renderText("Failed to fetch comments or no comments found.")
+      return(NULL)
+    }
+    
+    # Clean the comments
+    reddit_comments$cleaned_comment <- sapply(reddit_comments$comment, clean_text)
+    
+    # Analyze sentiment for leaders
+    leaders_sentiment <- sapply(leaders, function(leader) {
+      relevant_comments <- reddit_comments[grepl(leader, reddit_comments$cleaned_comment, ignore.case = TRUE), ]
+      if (nrow(relevant_comments) > 0) {
+        sentiment_scores <- get_polarity(relevant_comments$cleaned_comment)
+        mean(sentiment_scores$sentiment, na.rm = TRUE)
+      } else {
+        NA
+      }
+    })
+    
+    # Analyze sentiment for countries
+    countries_sentiment <- sapply(countries, function(country) {
+      relevant_comments <- reddit_comments[grepl(country, reddit_comments$cleaned_comment, ignore.case = TRUE), ]
+      if (nrow(relevant_comments) > 0) {
+        sentiment_scores <- get_polarity(relevant_comments$cleaned_comment)
+        mean(sentiment_scores$sentiment, na.rm = TRUE)
+      } else {
+        NA
+      }
+    })
+    
+    # Prepare summaries
+    output$sentimentSummary <- renderText({
+      paste("Analyzed", nrow(reddit_comments), "comments from the", subreddit, "subreddit.")
+    })
+    
+    # Explain sentiment scale
+    output$sentimentScale <- renderText({
+      "Sentiment Scale: The sentiment score ranges from -1 to +1, where -1 indicates very negative sentiment, 0 indicates neutral sentiment, and +1 indicates very positive sentiment. A higher score suggests a more favorable perception."
+    })
+    
+    # Store leader and country sentiment results
+    sentiment_results <- data.frame(
+      Entity = c(leaders, countries),
+      Average_Sentiment = c(leaders_sentiment, countries_sentiment)
+    )
+    
+    # Top comments for output
+    output$topComments <- renderPrint({
+      top_positive <- head(reddit_comments[order(-get_polarity(reddit_comments$cleaned_comment)$sentiment), ], 5)
+      top_negative <- head(reddit_comments[order(get_polarity(reddit_comments$cleaned_comment)$sentiment), ], 5)
+      paste("Top Positive Comments:\n", top_positive$comment, "\n\nTop Negative Comments:\n", top_negative$comment)
+    })
+    
+    # Download handler for sentiment data
+    output$downloadData <- downloadHandler(
+      filename = function() { paste("sentiment_analysis_", Sys.Date(), ".csv", sep="") },
+      content = function(file) {
+        write.csv(sentiment_results, file, row.names = FALSE)
+      }
+    )
+    
+    # Plot average sentiment for leaders and countries
+    output$sentimentPlot <- renderPlotly({
+      plot <- ggplot(sentiment_results, aes(x = reorder(Entity, Average_Sentiment), y = Average_Sentiment, fill = Entity)) +
+        geom_bar(stat = "identity") +
+        coord_flip() +
+        theme_minimal() +
+        labs(title = "Average Sentiment for Political Leaders and Countries", x = "Entity", y = "Average Sentiment") +
+        scale_fill_manual(values = scales::hue_pal()(length(sentiment_results$Entity))) +
+        geom_text(aes(label = round(Average_Sentiment, 2)), vjust = -0.5)  # Show sentiment score on bars
+      
+      ggplotly(plot)
+    })
+    
+    # Comparison Plot for the first two leaders
+    if (length(leaders) >= 2) {
+      comparison_data <- sentiment_results[sentiment_results$Entity %in% leaders[1:2], ]
+      output$comparisonPlot <- renderPlotly({
+        comparison_plot <- ggplot(comparison_data, aes(x = Entity, y = Average_Sentiment, fill = Entity)) +
+          geom_bar(stat = "identity", position = position_dodge()) +
+          coord_cartesian(ylim = c(-1, 1)) +  # Setting y limits for better comparison
+          theme_minimal() +
+          labs(title = paste("Comparison of Sentiment between", leaders[1], "and", leaders[2]), 
+               x = "Political Leaders", 
+               y = "Average Sentiment") +
+          scale_fill_manual(values = scales::hue_pal()(length(comparison_data$Entity))) +
+          geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+          annotate("text", x = 1.5, y = 0.05, label = "Neutral", color = "black", size = 5)
+        
+        ggplotly(comparison_plot)
+      })
+    } else {
+      output$comparisonPlot <- renderPlotly({
+        plot <- ggplot() + 
+          geom_blank() + 
+          labs(title = "Not enough leaders for comparison")
+        
+        ggplotly(plot)
+      })
+    }
+    
+    # Word frequency analysis with better filtering
+    clean_word_frequency <- function(text_vector) {
+      word_list <- unlist(strsplit(text_vector, "\\s+"))  # Split words
+      word_list <- word_list[nchar(word_list) > 2]  # Remove words with less than 3 characters
+      
+      # Custom stopwords (in addition to tm's built-in ones)
+      extra_stopwords <- c("also", "just", "will", "can", "one", "now", "get", "even", 
+                           "like", "dont", "cant", "im", "thats", "hes", "shes", "theyre")
+      
+      filtered_words <- word_list[!word_list %in% c(stopwords("en"), extra_stopwords)]  # Remove stopwords
+      return(filtered_words)
+    }
+    
+    # Frequency plot generation
+    output$wordFreqPlot <- renderPlotly({
+      # Apply word cleaning function to the cleaned comments
+      cleaned_words <- clean_word_frequency(reddit_comments$cleaned_comment)
+      
+      # Create a frequency table of the words
+      word_frequency <- table(cleaned_words)
+      
+      # Sort and take top 10 words by frequency
+      top_words <- sort(word_frequency, decreasing = TRUE)[1:10]
+      top_words_df <- data.frame(Word = names(top_words), Frequency = as.numeric(top_words))
+      
+      # Plot word frequencies
+      word_plot <- ggplot(top_words_df, aes(x = reorder(Word, Frequency), y = Frequency, fill = Word)) +
+        geom_bar(stat = "identity") +
+        coord_flip() +
+        theme_minimal() +
+        labs(title = "Most Common Words in Comments", x = "Words", y = "Frequency") +
+        scale_fill_manual(values = scales::hue_pal()(length(top_words_df$Word))) +
+        geom_text(aes(label = Frequency), vjust = -0.5)  # Show frequency on bars
+      
+      ggplotly(word_plot)
+    })
+    
+  })
+}
+
+# Run the application
+shinyApp(ui = ui, server = server)

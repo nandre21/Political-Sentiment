@@ -4,27 +4,27 @@ This Shiny app analyzes Reddit comments to extract sentiment and profanity score
 
 ## Features
 
-* User-friendly interface allowing input for subreddit, political leaders, and countries.
-* Fetches recent comments from specified subreddit.
-* Performs sentiment analysis and displays average sentiment for specified entities.
-* Visualizes sentiment analysis results using interactive plots.
-* Word frequency analysis with filtering of common and irrelevant words.
-* Displays top positive and negative comments from the fetched data.
-* Option to download sentiment analysis results as a CSV file.
+- User-friendly interface allowing input for subreddit, political leaders, and countries.
+- Fetches recent comments from specified subreddit.
+- Performs sentiment analysis and displays average sentiment for specified entities.
+- Visualizes sentiment analysis results using interactive plots.
+- Word frequency analysis with filtering of common and irrelevant words.
+- Displays top positive and negative comments from the fetched data.
+- Option to download sentiment analysis results as a CSV file.
 
 ## Getting Started
 
 To run the application, you will need to have R and RStudio installed on your machine. You will also need to install the following R packages:
 
-* shiny
-* dplyr
-* ggplot2
-* plotly
-* bslib
-* shinycssloaders
-* tm
-* sentimentr
-* RedditExtractoR
+- `shiny`
+- `dplyr`
+- `ggplot2`
+- `plotly`
+- `bslib`
+- `shinycssloaders`
+- `tm`
+- `sentimentr`
+- `RedditExtractoR`
 
 You can install these packages using the following command in RStudio:
 
@@ -48,8 +48,11 @@ Mathematics Behind Sentiment Analysis
 The core of sentiment analysis in this project relies on deriving sentiment scores from text data. Each comment is processed to assign a sentiment score based on the sentiment orientation of individual words. The sentiment score for a comment is computed as the sum of the sentiment scores of individual words, normalized for the number of words in the comment. Sentiment scores can range from -1 (very negative) to +1 (very positive), with scores near 0 indicating neutrality.
 
 Filtering Words
-The project also filters out irrelevant and common words to enhance the accuracy of the sentiment analysis. Words filtered include stop words, profane words, and irrelevant words.
+The project also filters out irrelevant and common words to enhance the accuracy of the sentiment analysis. Words filtered include:
 
+Stop Words: Common words such as "the", "is", "in", which do not add significant meaning to the text.
+Profane Words: Offensive language that might skew sentiment analysis results.
+Irrelevant Words: Words that are specific to particular contexts and do not contribute to sentiment, such as "yeah", "okay", etc.
 Conclusion
 This Shiny app serves as an innovative tool for analyzing sentiment and profanity in Reddit comments, providing insights into public opinion on political leaders and countries. By interpreting sentiment scores and understanding trends, users can foresee potential political changes and the public's reaction to political events. This project not only enhances the ability to engage with current political discourse but also empowers researchers, policymakers, and interested citizens to understand the dynamics of public sentiment in an increasingly digital world.
 
